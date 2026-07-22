@@ -988,7 +988,7 @@ function StudyTab({ sessions, onAddSession, onDeleteSession }) {
       }
     }, 1000);
     return () => clearInterval(id);
-  }, [running, mode, onAddSession]);
+  }, [running, mode]);
 
   function resetTimer() {
     setRunning(false);
@@ -1330,7 +1330,7 @@ function PhotosTab({ stats }) {
                 src={photo.data}
                 alt="locked"
                 className="absolute inset-0 w-full h-full object-cover"
-                style={{ filter: 'blur(29px) grayscale(70%)', opacity: 0.45 }}
+                style={{ filter: 'blur(40px) grayscale(70%)', opacity: 0.20 }}
               />
               <div className="relative z-10 flex flex-col items-center gap-1" style={{ color: '#FFFBFC' }}>
                 <Lock size={18} />
