@@ -961,35 +961,66 @@ function TestsTab({ sortedPTs, onAdd, onDelete, cumulativeHoursByDate, targetSco
 function StudyTab({ sessions, onAddSession, onDeleteSession }) {
   const [mode, setMode] = useState('stopwatch'); // stopwatch | pomodoro
   const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0); // stopwatch seconds
+  const [elapsed, setElapsed] = useState(0); // stopwatch seconds (derived from wall clock)
   const [pomPhase, setPomPhase] = useState('work');
   const [pomSecondsLeft, setPomSecondsLeft] = useState(25 * 60);
   const phaseRef = useRef('work');
 
+  // Wall-clock anchors instead of tick-counting, so backgrounded/throttled tabs don't cause drift.
+  const stopwatchBaseRef = useRef(0);   // accumulated seconds from previous run segments
+  const stopwatchStartRef = useRef(null); // Date.now() when the current run segment began
+  const phaseBaseRef = useRef(0);       // accumulated seconds already spent in the current pomodoro phase
+  const phaseStartRef = useRef(null);   // Date.now() when the current run segment of this phase began
+
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => {
+
+    if (mode === 'stopwatch') stopwatchStartRef.current = Date.now();
+    else phaseStartRef.current = Date.now();
+
+    function tick() {
       if (mode === 'stopwatch') {
-        setElapsed((e) => e + 1);
+        const secs = stopwatchBaseRef.current + Math.floor((Date.now() - stopwatchStartRef.current) / 1000);
+        setElapsed(secs);
       } else {
-        setPomSecondsLeft((sec) => {
-          if (sec <= 1) {
-            if (phaseRef.current === 'work') {
-              onAddSession({ date: todayISO(), minutes: 25 });
-              phaseRef.current = 'break';
-              setPomPhase('break');
-              return 5 * 60;
-            } else {
-              phaseRef.current = 'work';
-              setPomPhase('work');
-              return 25 * 60;
-            }
+        const duration = phaseRef.current === 'work' ? 25 * 60 : 5 * 60;
+        const secsIntoPhase = phaseBaseRef.current + Math.floor((Date.now() - phaseStartRef.current) / 1000);
+        const remaining = duration - secsIntoPhase;
+        if (remaining <= 0) {
+          if (phaseRef.current === 'work') {
+            onAddSession({ date: todayISO(), minutes: 25 });
+            phaseRef.current = 'break';
+            setPomPhase('break');
+          } else {
+            phaseRef.current = 'work';
+            setPomPhase('work');
           }
-          return sec - 1;
-        });
+          phaseBaseRef.current = 0;
+          phaseStartRef.current = Date.now();
+          setPomSecondsLeft(phaseRef.current === 'work' ? 25 * 60 : 5 * 60);
+        } else {
+          setPomSecondsLeft(remaining);
+        }
       }
-    }, 1000);
-    return () => clearInterval(id);
+    }
+
+    tick(); // correct immediately on start / resume
+    const id = setInterval(tick, 1000);
+
+    function onVisible() {
+      if (document.visibilityState === 'visible') tick();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (mode === 'stopwatch') {
+        stopwatchBaseRef.current += Math.floor((Date.now() - stopwatchStartRef.current) / 1000);
+      } else {
+        phaseBaseRef.current += Math.floor((Date.now() - phaseStartRef.current) / 1000);
+      }
+    };
   }, [running, mode]);
 
   function resetTimer() {
@@ -998,13 +1029,19 @@ function StudyTab({ sessions, onAddSession, onDeleteSession }) {
     setPomSecondsLeft(25 * 60);
     phaseRef.current = 'work';
     setPomPhase('work');
+    stopwatchBaseRef.current = 0;
+    stopwatchStartRef.current = null;
+    phaseBaseRef.current = 0;
+    phaseStartRef.current = null;
   }
 
   function logStopwatch() {
-    const minutes = Math.round(elapsed / 60);
+    const minutes = elapsed > 0 ? Math.max(1, Math.round(elapsed / 60)) : 0;
     if (minutes > 0) onAddSession({ date: todayISO(), minutes });
     setRunning(false);
     setElapsed(0);
+    stopwatchBaseRef.current = 0;
+    stopwatchStartRef.current = null;
   }
 
   function fmtClock(totalSeconds) {
